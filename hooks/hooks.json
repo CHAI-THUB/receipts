@@ -1,0 +1,27 @@
+{
+  "description": "receipts: when source code changed and there is no receipt for its current state, ask for one (once per code state).",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/receipts.mjs\" session-start",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/bin/receipts.mjs\" gate",
+            "timeout": 20
+          }
+        ]
+      }
+    ]
+  }
+}
