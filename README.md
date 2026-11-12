@@ -39,6 +39,41 @@ That is real output. Reproduce it with `./examples/demo.sh`.
 The point is review time. Instead of re-reading a whole diff, you read the two
 lines no test is holding up, and the one assertion that quietly disappeared.
 
+## Why this exists
+
+AI agents now write code faster than anyone can review it. The evidence they
+offer is almost always the same sentence: "all tests pass". That sentence has a
+hole in it, because the agent usually wrote the code *and* the tests. A suite
+can be green while checking nothing about the change in front of you.
+
+The checks people already lean on each answer a different, easier question:
+
+| Signal | What it tells you | What it cannot tell you |
+|---|---|---|
+| Tests pass | Nothing that is tested is broken | Whether this change is tested at all |
+| Line coverage | The changed lines were executed | Whether anything asserted on the result |
+| "Did the agent really run the tests?" checkers | The claim matches what ran | Whether passing means anything |
+| Human review | Everything, in principle | Scales with diff size, not with risk |
+| **Receipts** | **Which changes a test would notice if they vanished** | Whether the change is correct (see limits) |
+
+So the reviewer is stuck: trust the green tick, or re-read every line. Receipts
+gives a third option. It runs the one experiment that separates real evidence
+from decoration, *undo the change and see whether anything complains*, and
+hands back a short list of the changes nothing complained about.
+
+```mermaid
+flowchart LR
+    A["Agent says<br/>all tests pass"] --> B{"Would the tests fail<br/>without this change?"}
+    B -->|"Yes"| C["Proven<br/>skim it"]
+    B -->|"No"| D["Unproven<br/>read this part"]
+    classDef good fill:#1a7f37,stroke:#116329,color:#ffffff
+    classDef bad fill:#cf222e,stroke:#a40e26,color:#ffffff
+    classDef ask fill:#9a6700,stroke:#7d4e00,color:#ffffff
+    class C good
+    class D bad
+    class B ask
+```
+
 ## Use it
 
 ```bash
@@ -97,6 +132,37 @@ does not hide it: the SessionStart hook records where the session began.
 
 ## How it works
 
+```mermaid
+flowchart TD
+    A["Your diff<br/>staged, unstaged, untracked"] --> B{"Sort files"}
+    B -->|"source"| C["Split into units<br/>changed line groups, new-file blocks"]
+    B -->|"tests"| I["Integrity check<br/>assertions edited or removed,<br/>skipped or deleted tests"]
+    B -->|"docs, config, data"| N["Listed as not checked"]
+    C --> S["Scratch copy of the repo<br/>your working tree is never touched"]
+    S --> G{"Run tests<br/>as delivered"}
+    G -->|"fail"| RED["RED<br/>the work is not done"]
+    G -->|"pass"| W{"Revert the whole change<br/>and run tests"}
+    W -->|"still pass"| VAC["VACUOUS<br/>the tests prove nothing about it"]
+    W -->|"fail"| U{"Revert one unit<br/>and run tests"}
+    U -->|"fail"| P["PROVEN<br/>a test depends on it"]
+    U -->|"still pass"| X["UNPROVEN<br/>review this yourself"]
+    U -.->|"next unit"| U
+    P --> R["Report<br/>terminal, Markdown, JSON, exit code"]
+    X --> R
+    I --> R
+    N --> R
+    RED --> R
+    VAC --> R
+    classDef good fill:#1a7f37,stroke:#116329,color:#ffffff
+    classDef bad fill:#cf222e,stroke:#a40e26,color:#ffffff
+    classDef warn fill:#9a6700,stroke:#7d4e00,color:#ffffff
+    classDef step fill:#0969da,stroke:#0550ae,color:#ffffff
+    class P good
+    class X,RED,VAC bad
+    class I,N warn
+    class G,W,U,B step
+```
+
 1. Collect what changed against the base: staged, unstaged and untracked files.
 2. Sort files into source, tests, and everything else (docs, config, data).
 3. Copy the working tree to a temp directory. Git-ignored entries such as
@@ -113,6 +179,73 @@ does not hide it: the SessionStart hook records where the session began.
 
 Cost: about (number of units + 2) test runs. Use a fast, fail-fast test command.
 `--budget` and `--max-units` cap the work; anything skipped is reported as `not run`, never as proven.
+
+## Architecture
+
+Four ways in, one small core, and a strict rule about what gets touched: the
+working tree is only ever read, all experiments happen in a copy in the system
+temp folder, and the only thing written to your repo is a report inside `.git/`,
+where it cannot show up in `git status`.
+
+```mermaid
+flowchart LR
+    subgraph entry["Entry points"]
+        CLI["CLI<br/>receipts prove"]
+        CI["CI job"]
+        SK["Agent skill"]
+        HK["Claude Code hooks<br/>SessionStart and Stop"]
+    end
+    subgraph core["Core, zero dependencies"]
+        PR["prove<br/>runs the experiment"]
+        CH["changes<br/>what differs from the base"]
+        CL["classify<br/>source, test, other"]
+        UN["units<br/>revertable pieces"]
+        SC["scratch<br/>temp copy and test runner"]
+        IN["integrity<br/>weakened tests"]
+        RP["report<br/>text, Markdown, JSON"]
+        GT["gate<br/>is there a current receipt?"]
+    end
+    subgraph disk["What it touches on disk"]
+        WT["Your working tree<br/>read only"]
+        ST[".git/receipts<br/>last report and state"]
+        TMP["System temp folder<br/>scratch copy, deleted afterwards"]
+    end
+    CI --> CLI
+    SK --> CLI
+    CLI --> PR
+    HK --> GT
+    PR --> CH
+    CH --> CL
+    PR --> UN
+    PR --> SC
+    PR --> IN
+    PR --> RP
+    GT --> CH
+    CH -.->|"reads"| WT
+    SC -.->|"writes"| TMP
+    PR -.->|"saves"| ST
+    GT -.->|"reads"| ST
+    classDef in fill:#8250df,stroke:#6639ba,color:#ffffff
+    classDef mod fill:#0969da,stroke:#0550ae,color:#ffffff
+    classDef safe fill:#1a7f37,stroke:#116329,color:#ffffff
+    classDef tmp fill:#9a6700,stroke:#7d4e00,color:#ffffff
+    class CLI,CI,SK,HK in
+    class PR,CH,CL,UN,SC,IN,RP,GT mod
+    class WT,ST safe
+    class TMP tmp
+```
+
+| Path | Role |
+|---|---|
+| `bin/receipts.mjs` | Command line: `prove`, `report`, and the two hook entry points |
+| `src/changes.mjs`, `src/classify.mjs` | Find what changed and sort it into source, test, other |
+| `src/hunks.mjs` | Split each changed file into units that can be reverted on their own |
+| `src/scratch.mjs` | Build the temporary copy, run the test command, refuse writes outside the copy |
+| `src/prove.mjs` | The experiment: as delivered, whole change reverted, then one unit at a time |
+| `src/integrity.mjs` | Spot weakened tests |
+| `src/report.mjs` | Terminal, Markdown and JSON output |
+| `src/gate.mjs`, `hooks/hooks.json` | Ask an agent for a receipt once per code state |
+| `skills/receipts/SKILL.md` | Teaches an agent to run receipts and report the result as-is |
 
 ## What "proven" does and does not mean
 
