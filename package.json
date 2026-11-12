@@ -1,0 +1,35 @@
+{
+  "name": "receipts-cli",
+  "version": "0.1.0",
+  "description": "Which of these code changes would a test actually notice? Reverts each changed hunk and re-runs your tests.",
+  "type": "module",
+  "bin": {
+    "receipts": "bin/receipts.mjs"
+  },
+  "files": [
+    "bin",
+    "src",
+    "skills",
+    "hooks",
+    ".claude-plugin"
+  ],
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\""
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "keywords": [
+    "ai-agents",
+    "claude-code",
+    "verification",
+    "mutation-testing",
+    "code-review",
+    "testing"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CHAI-THUB/receipts.git"
+  }
+}
