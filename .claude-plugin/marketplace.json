@@ -1,0 +1,13 @@
+{
+  "name": "receipts",
+  "owner": {
+    "name": "CHAI-THUB"
+  },
+  "plugins": [
+    {
+      "name": "receipts",
+      "source": "./",
+      "description": "Shows which code changes a test would actually notice, by reverting each change and re-running the tests."
+    }
+  ]
+}

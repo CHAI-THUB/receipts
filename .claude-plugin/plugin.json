@@ -1,0 +1,16 @@
+{
+  "name": "receipts",
+  "version": "0.1.0",
+  "description": "Shows which code changes a test would actually notice, by reverting each change and re-running the tests.",
+  "license": "MIT",
+  "keywords": [
+    "verification",
+    "testing",
+    "code-review"
+  ],
+  "author": {
+    "name": "CHAI-THUB",
+    "url": "https://github.com/CHAI-THUB"
+  },
+  "repository": "https://github.com/CHAI-THUB/receipts"
+}
